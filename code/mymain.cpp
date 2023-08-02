@@ -25,6 +25,8 @@
 
 extern "C" {
 #include "neil.h"
+#include "src/mupen64plus-core/src/main/device.h"
+#include "src/mupen64plus-core/src/main/main.h"
 
 int angryVerticalResolution = 240;
 int mouseX = 0;
@@ -196,8 +198,6 @@ enum MY_FONT_SIZE {
     FONTSIZE_40
 };
 
-TTF_Font* font24;
-TTF_Font* font40;
 SDL_Color fontcolorWhite = { 255, 255, 255 };
 SDL_Color fontcolorRed = { 0, 0, 255 }; //needs to be BGRA becuse of emscripten
 Uint32 frameStart, frameTime;
@@ -210,9 +210,7 @@ char fps_text[200];
 float xLocation = 0.0f;
 float yLocation = 0.0f;
 unsigned int shaderProgram = 0;
-char* loadFile(char* filename);
 void limitFPS();
-unsigned int initShaders();
 char rom_name[100];
 bool runApp = true;
 int swapCount = 0;
@@ -232,29 +230,6 @@ SDL_Window* WindowOpenGL;
 void mainLoop();
 bool isPressedOnce(bool condition, bool* lastPressedVar);
 bool isReleasedOnce(bool condition, bool* lastPressedVar); 
-
-GLuint imageOverlay;
-void setupDrawTextOpenGL();
-void drawTextOpenGL(const char* text, int x, int y, SDL_Color color, MY_FONT_SIZE fontsize);
-void drawOpenglTexture(int x, int y, int w, int h, GLuint imageID);
-GLuint loadOpenGLTexture(const char*);
-unsigned int vertexBufferDrawText;
-float positionsDrawText[] = {
-        -1.0f, -1.0f, 0.0f, 1.0f,
-        1.0f, -1.0f, 1.0f, 1.0f,
-        1.0f, 1.0f, 1.0f, 0.0f,
-        -1.0f, -1.0f, 0.0f, 1.0f,
-        1.0f, 1.0f, 1.0f, 0.0f,
-        -1.0f, 1.0f, 0.0f, 0.0f,
-};
-float positionsDrawTextFinal[] = {
-        -1.0f, -1.0f, 0.0f, 1.0f,
-        1.0f, -1.0f, 1.0f, 1.0f,
-        1.0f, 1.0f, 1.0f, 0.0f,
-        -1.0f, -1.0f, 0.0f, 1.0f,
-        1.0f, 1.0f, 1.0f, 0.0f,
-        -1.0f, 1.0f, 0.0f, 0.0f,
-};
 
 //gamepad
 int Joy_Mapping_Up = 0;
@@ -601,7 +576,7 @@ int main(int argc, char* argv[])
 {
 
 #ifdef __EMSCRIPTEN__
-    extractZipFiles("assets.zip");
+    //extractZipFiles("assets.zip");
 #endif
 
     //use to view arguments
@@ -641,10 +616,6 @@ int main(int argc, char* argv[])
 #endif
 
     //initialize font system
-    TTF_Init();
-    font24 = TTF_OpenFont("res/arial.ttf", 24);
-    font40 = TTF_OpenFont("res/arial.ttf", 40);
-    //TTF_SetFontStyle(font, TTF_STYLE_BOLD);
 
     //give it an initial value so drawText doesn't crash
     sprintf(fps_text, "FPS:");
@@ -667,11 +638,6 @@ int main(int argc, char* argv[])
         printf("RENDERER: %s\n", glGetString(GL_RENDERER));
         printf("VERSION: %s\n", glGetString(GL_VERSION));
         printf("GLSL: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
-
-        setupDrawTextOpenGL();
-        imageOverlay = loadOpenGLTexture("overlay.png");
-
-        shaderProgram = initShaders();
 
         //clear the screen
         glClearColor(184.0f / 255.0f, 213.0f / 255.0f, 238.0f / 255.0f, 1.0f);
@@ -735,7 +701,6 @@ int main(int argc, char* argv[])
 }
 
 //overlay menu
-void drawOverlay();
 void processMenuItemButtons();
 bool lastSaveStateKeyPressed = false;
 bool lastLoadStateKeyPressed = false;
@@ -1148,24 +1113,7 @@ void mainLoop()
             glClearColor(184.0f / 255.0f, 213.0f / 255.0f, 238.0f / 255.0f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
 
-            drawAngryOpenGL();
-        }
-
-        if (showOverlay)
-        {
-            drawOverlay();
-        }
-
-        //draw fps
-        if (showFPS)
-        {
-            drawTextOpenGL(fps_text, 0, 0, fontcolorWhite, FONTSIZE_24);
-        }
-
-        if (toastCounter > 0)
-        {
-            drawTextOpenGL(toast_message, 0, 30, fontcolorWhite, FONTSIZE_24);
-            toastCounter--;
+            //drawAngryOpenGL();
         }
         
         SDL_GL_SwapWindow(WindowOpenGL);
@@ -1290,24 +1238,6 @@ void processMenuItemButtons()
 }
 
 
-void drawOverlay()
-{
-    drawOpenglTexture(50, 50, 640 - 100, 480 - 100, imageOverlay);
-    int menuItemsCount = sizeof(menuItems) / 30;
-    int startX = 200;
-    int startY = 480 - 120;
-
-    for (int i = 0; i < menuItemsCount; i++)
-    {
-        int currentY = startY - (i * 80);
-        if (i == selectedMenuItem)
-        {
-            drawTextOpenGL(">", startX -30, currentY, fontcolorRed, FONTSIZE_40);
-        }
-        drawTextOpenGL(menuItems[i], startX, currentY,fontcolorRed,FONTSIZE_40);
-    }
-}
-
 
 void limitFPS()
 {
@@ -1360,383 +1290,6 @@ extern "C" {
         if (show==0) showFPS = false;
     }
 
-}
-
-char* loadFile(char* filename)
-{
-    FILE* f = fopen(filename, "rb");
-    fseek(f, 0, SEEK_END);
-    int fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);  /* same as rewind(f); */
-
-    char* filecontent = (char*)malloc(fsize + 1);
-    int readsize = fread(filecontent, 1, fsize, f);
-    fclose(f);
-
-    filecontent[readsize] = '\0';
-
-    return filecontent;
-}
-
-unsigned int compileShader(int shaderType, char* source)
-{
-    unsigned int id = glCreateShader(shaderType);
-    glShaderSource(id, 1, (const char**)&source, NULL);
-    glCompileShader(id);
-
-    //ERROR HANDLING
-    int result;
-    glGetShaderiv(id, GL_COMPILE_STATUS, &result);
-    if (result == GL_FALSE)
-    {
-        int length;
-        glGetShaderiv(id, GL_INFO_LOG_LENGTH, &length);
-        char* message = (char*)alloca(length * sizeof(char));
-        glGetShaderInfoLog(id, length, &length, message);
-        if (shaderType == GL_VERTEX_SHADER)
-            printf("FAILED TO COMPILE VERTEX SHADER + %s\n", message);
-        if (shaderType == GL_FRAGMENT_SHADER)
-            printf("FAILED TO COMPILE FRAGMENT SHADER + %s\n", message);
-
-        glDeleteShader(id);
-    }
-
-    return id;
-}
-
-unsigned int initShaders()
-{
-    char* vertexSource = loadFile((char*)"shader_vert.hlsl");
-    char* fragmentSource = loadFile((char*)"shader_frag.hlsl");
-
-    unsigned int program = glCreateProgram();
-    unsigned int vs = compileShader(GL_VERTEX_SHADER, vertexSource);
-    unsigned int fs = compileShader(GL_FRAGMENT_SHADER, fragmentSource);
-
-    glAttachShader(program, vs);
-    glAttachShader(program, fs);
-    glLinkProgram(program);
-    glValidateProgram(program);
-
-    glDeleteShader(vs);
-    glDeleteShader(fs);
-
-    return program;
-}
-
-void setupDrawTextOpenGL()
-{
-    //create the buffer
-    glGenBuffers(1, &vertexBufferDrawText);
-}
-
-void translateDrawTextScreenCoordinates(int x, int y, int w, int h)
-{
-    float screenwidth = 640;
-    float screenheight = 480;
-
-    //openGL coordinates go from (-1,-1) to (1,1) as a square
-    float newx = ((2.0f / (float)screenwidth) * (float)x) - 1.0f;
-    float newy = ((2.0f / (float)screenheight) * (float)y) - 1.0f;
-    float newwidth = ((2.0f / (float)screenwidth) * (float)w);
-    float newheight = ((2.0f / (float)screenheight) * (float)h);
-
-    for (int i = 0; i < 6; i++)
-    {
-        //handle X
-        int tempX = positionsDrawText[i * 4];
-        if (tempX < 0)
-        {
-            //convert it to x
-            positionsDrawTextFinal[i * 4] = newx;
-        }
-        else
-        {
-            //convert it to x + w
-            positionsDrawTextFinal[i * 4] = newx + newwidth;
-        }
-
-        //handle Y
-        int tempY = positionsDrawText[(i * 4) + 1];
-        if (tempY < 0)
-        {
-            //convert it to y
-            positionsDrawTextFinal[(i * 4) + 1] = newy;
-        }
-        else
-        {
-            //convert it to y + h
-            positionsDrawTextFinal[(i * 4) + 1] = newy + newheight;
-        }
-
-    }
-}
-
-//we use SDL's API to generate an image of the text but then
-//we need to convert it into an OpenGL Texture
-//NOTE - x and y start at the bottom left corner of the screen
-void drawTextOpenGL(const char* text, int x, int y, SDL_Color color, MY_FONT_SIZE fontsize)
-{
-    //need this to enable transparency on the texture
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    GLuint texture;
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-
-    TTF_Font* font = NULL;
-
-    if (fontsize == FONTSIZE_24) font = font24;
-    if (fontsize == FONTSIZE_40) font = font40;
-
-    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text, color);
-
-    //surface->w TEXTURE WIDTH
-    //surface->h TEXTURE HEIGHT
-
-    translateDrawTextScreenCoordinates(x, y, surface->w, surface->h);
-
-    //we are technically using the same shader for 
-    //drawTextOpenGL() and drawOpenglTexture() so this
-    //code is nearly the same in both however 
-    //keeping it in both in case I ever have seperate shaders
-    glUseProgram(shaderProgram);
-
-    //bind it or "select" it
-    glBindBuffer(GL_ARRAY_BUFFER, vertexBufferDrawText);
-    //fill the buffer with data
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 24, positionsDrawTextFinal, GL_DYNAMIC_DRAW);
-
-    //define the position attribute
-    glVertexAttribPointer(
-        0, //attribute number for shader
-        2, //size or number of components for this attribute, so 2 floats for a position
-        GL_FLOAT, //data type of each component
-        GL_FALSE, //do we want it to auto normalize the data for us (or convert it to a range of 0-1)
-        sizeof(float) * 4, //stride or number of bytes between each vertex
-        (GLvoid*)0 //offset to this attribute - needs to be converted to a pointer (const void*)8 as an example
-    );
-
-    //texture coordinate
-    glVertexAttribPointer(
-        1, //attribute number for shader
-        2, //size or number of components for this attribute, so 2 floats for a position
-        GL_FLOAT, //data type of each component
-        GL_FALSE, //do we want it to auto normalize the data for us (or convert it to a range of 0-1)
-        sizeof(float) * 4, //stride or number of bytes between each vertex
-        (GLvoid*)8 //offset to this attribute - needs to be converted to a pointer (const void*)8 as an example
-    );
-
-
-    //need to enable this attribute in this case 0th attribute (matches first parameter of glVertexAttribPointer above)
-    glEnableVertexAttribArray(0);
-    glEnableVertexAttribArray(1);
-
-
-    char colors = surface->format->BytesPerPixel;
-    int texture_format;
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    //Emscripten doesn't support GL_BGRA ??
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, surface->w, surface->h, 0,
-        GL_RGBA, GL_UNSIGNED_BYTE, surface->pixels);
-
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, texture);
-
-    //render the triangles
-    glDrawArrays(
-        GL_TRIANGLES, //what are we drawing
-        0, //first index to draw
-        6 //how many to draw
-    );
-
-
-    glDisable(GL_BLEND);
-
-
-    glDeleteTextures(1, &texture);
-    SDL_FreeSurface(surface);
-
-    // //if we don't destroy this you will see in 
-    // //windows task manager the memory will keep growing
-    // SDL_DestroyTexture(fontTexture); 
-}
-
-void drawAngryOpenGL()
-{
-    //need this to enable transparency on the texture
-    //glEnable(GL_BLEND);
-    //glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    GLuint texture;
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-
-    translateDrawTextScreenCoordinates(0, 0, 640, 480);
-
-    //we are technically using the same shader for 
-    //drawTextOpenGL() and drawOpenglTexture() so this
-    //code is nearly the same in both however 
-    //keeping it in both in case I ever have seperate shaders
-    glUseProgram(shaderProgram);
-
-    //bind it or "select" it
-    glBindBuffer(GL_ARRAY_BUFFER, vertexBufferDrawText);
-    //fill the buffer with data
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 24, positionsDrawTextFinal, GL_DYNAMIC_DRAW);
-
-    //define the position attribute
-    glVertexAttribPointer(
-        0, //attribute number for shader
-        2, //size or number of components for this attribute, so 2 floats for a position
-        GL_FLOAT, //data type of each component
-        GL_FALSE, //do we want it to auto normalize the data for us (or convert it to a range of 0-1)
-        sizeof(float) * 4, //stride or number of bytes between each vertex
-        (GLvoid*)0 //offset to this attribute - needs to be converted to a pointer (const void*)8 as an example
-    );
-
-    //texture coordinate
-    glVertexAttribPointer(
-        1, //attribute number for shader
-        2, //size or number of components for this attribute, so 2 floats for a position
-        GL_FLOAT, //data type of each component
-        GL_FALSE, //do we want it to auto normalize the data for us (or convert it to a range of 0-1)
-        sizeof(float) * 4, //stride or number of bytes between each vertex
-        (GLvoid*)8 //offset to this attribute - needs to be converted to a pointer (const void*)8 as an example
-    );
-
-
-    //need to enable this attribute in this case 0th attribute (matches first parameter of glVertexAttribPointer above)
-    glEnableVertexAttribArray(0);
-    glEnableVertexAttribArray(1);
-
-
-    int texture_format;
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    //Emscripten doesn't support GL_BGRA ??
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 640, angryVerticalResolution, 0,
-        GL_RGBA, GL_UNSIGNED_BYTE, get_video_buffer());
-
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, texture);
-
-    //render the triangles
-    glDrawArrays(
-        GL_TRIANGLES, //what are we drawing
-        0, //first index to draw
-        6 //how many to draw
-    );
-
-
-    glDisable(GL_BLEND);
-
-
-    glDeleteTextures(1, &texture);
-
-    // //if we don't destroy this you will see in 
-    // //windows task manager the memory will keep growing
-    // SDL_DestroyTexture(fontTexture); 
-}
-
-
-GLuint loadOpenGLTexture(const char* file)
-{
-    GLuint imageID;
-
-    int width = 0;
-    int height = 0;
-    int bpp = 0;
-    unsigned char* localBuffer;
-
-    //normally opengl draws things upside down
-    //since the origin is at the bottom left
-    //however we already flipped the texture coordinates
-    //in positionsDrawText[] so we can load normally
-    //otherwise you would pass 1 into this function
-    stbi_set_flip_vertically_on_load(0);
-    
-    localBuffer = stbi_load(file, &width, &height, &bpp, 4);
-
-    glGenTextures(1, &imageID);
-    glBindTexture(GL_TEXTURE_2D, imageID);
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, localBuffer);
-
-    if (localBuffer)
-        stbi_image_free(localBuffer);
-
-    return imageID;
-}
-
-void drawOpenglTexture(int x, int y, int w, int h, GLuint imageID)
-{
-    //need this to enable transparency on the texture
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    translateDrawTextScreenCoordinates(x, y, w, h);
-
-    glUseProgram(shaderProgram);
-
-    //bind it or "select" it
-    glBindBuffer(GL_ARRAY_BUFFER, vertexBufferDrawText);
-    //fill the buffer with data
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 24, positionsDrawTextFinal, GL_DYNAMIC_DRAW);
-
-    //define the position attribute
-    glVertexAttribPointer(
-        0, //attribute number for shader
-        2, //size or number of components for this attribute, so 2 floats for a position
-        GL_FLOAT, //data type of each component
-        GL_FALSE, //do we want it to auto normalize the data for us (or convert it to a range of 0-1)
-        sizeof(float) * 4, //stride or number of bytes between each vertex
-        (GLvoid*)0 //offset to this attribute - needs to be converted to a pointer (const void*)8 as an example
-    );
-
-    //texture coordinate
-    glVertexAttribPointer(
-        1, //attribute number for shader
-        2, //size or number of components for this attribute, so 2 floats for a position
-        GL_FLOAT, //data type of each component
-        GL_FALSE, //do we want it to auto normalize the data for us (or convert it to a range of 0-1)
-        sizeof(float) * 4, //stride or number of bytes between each vertex
-        (GLvoid*)8 //offset to this attribute - needs to be converted to a pointer (const void*)8 as an example
-    );
-
-
-    //need to enable this attribute in this case 0th attribute (matches first parameter of glVertexAttribPointer above)
-    glEnableVertexAttribArray(0);
-    glEnableVertexAttribArray(1);
-
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, imageID);
-
-    //render the triangle
-    glDrawArrays(
-        GL_TRIANGLES, //what are we drawing
-        0, //first index to draw
-        6 //how many to draw
-    );
-    
 }
 
 int getKeyMapping(std::string line)
@@ -1850,4 +1403,14 @@ extern "C" {
 	{
 		endframeCallback = true;
 	}
+
+    unsigned int readMemU32(unsigned int address)
+    {
+        return g_dev.ri.rdram.dram[address/4];
+    }
+
+    void writeMemU32(unsigned int address, unsigned int val)
+    {
+        g_dev.ri.rdram.dram[address/4] = val;
+    }
 }
